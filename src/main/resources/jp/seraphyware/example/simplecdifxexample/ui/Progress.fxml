@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.text.*?>
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import java.lang.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane maxHeight="-Infinity" maxWidth="-Infinity"
+	minHeight="-Infinity" minWidth="-Infinity" prefHeight="117.0"
+	prefWidth="240.0" xmlns="http://javafx.com/javafx/8" xmlns:fx="http://javafx.com/fxml/1">
+	<center>
+		<ProgressIndicator fx:id="progressIndicator"
+			progress="0.0" BorderPane.alignment="CENTER" />
+	</center>
+	<bottom>
+		<VBox alignment="TOP_CENTER" BorderPane.alignment="CENTER">
+			<children>
+				<Button fx:id="btnCancel" mnemonicParsing="false" onAction="#onCancel"
+					text="Cancel" />
+			</children>
+			<BorderPane.margin>
+				<Insets top="5.0" />
+			</BorderPane.margin>
+		</VBox>
+	</bottom>
+	<top>
+		<Label fx:id="txtLabel" text="Please wait a moment."
+			BorderPane.alignment="CENTER">
+			<BorderPane.margin>
+				<Insets bottom="5.0" top="5.0" />
+			</BorderPane.margin>
+			<font>
+				<Font size="14.0" />
+			</font>
+		</Label>
+	</top>
+	<padding>
+		<Insets bottom="8.0" left="5.0" right="5.0" top="5.0" />
+	</padding>
+</BorderPane>
