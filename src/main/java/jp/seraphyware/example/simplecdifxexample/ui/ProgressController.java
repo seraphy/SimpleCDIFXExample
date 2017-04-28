@@ -2,6 +2,8 @@ package jp.seraphyware.example.simplecdifxexample.ui;
 
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.FutureTask;
+import java.util.function.Function;
 import java.util.logging.Logger;
 
 import javax.enterprise.context.Dependent;
@@ -23,6 +25,7 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.stage.WindowEvent;
 import jp.seraphyware.example.simplecdifxexample.utils.BackgroundTaskService;
+import jp.seraphyware.example.simplecdifxexample.utils.ChainedJavaFXTask;
 import jp.seraphyware.example.simplecdifxexample.utils.FXMLWindowController;
 import jp.seraphyware.example.simplecdifxexample.utils.FXThreadExecutor;
 
@@ -88,6 +91,33 @@ public class ProgressController extends AbstractFXMLWindowController {
 		return stg;
 	}
 
+	private void bind(Task<?> bgTask) {
+		Stage stg = getStage();
+
+		stg.titleProperty().bind(bgTask.titleProperty());
+		progressProperty().set(-1); // 既定はintermediate (サークル表示)
+		labelTextProperty().bind(bgTask.messageProperty());
+
+		bgTask.setOnRunning(e -> {
+			progressProperty().bind(bgTask.progressProperty());
+		});
+
+		setOnCancel(evt -> {
+			log.info("☆☆☆request cancel☆☆☆"); //$NON-NLS-1$
+			bgTask.cancel();
+			evt.consume();
+		});
+	}
+
+	private void unbind() {
+		getStage().titleProperty().unbind();
+		progressProperty().unbind();
+		labelTextProperty().unbind();
+
+		// ※ intermediateを解除しないとメモリリークする. (java8u77現在)
+		progressProperty().set(1);
+	}
+
 	/**
 	 * ワーカーの実行と、実行中のプログレスダイアログの表示制御を行う.<br>
 	 * @param owner 親ウィンドウ
@@ -95,53 +125,77 @@ public class ProgressController extends AbstractFXMLWindowController {
 	 */
 	public static void doProgressAndWait(Window owner, Task<?> bgTask) {
 		Objects.requireNonNull(bgTask);
+		progressAndWait(owner, bgTask, (self) -> {
+			return self.bgTaskSerive.createAsyncCompletableFuture(bgTask);
+		});
+	}
 
-		Instance<ProgressController> progProv = CDI.current().select(ProgressController.class);
+	/**
+	 * 連続したワーカーの実行と、実行中のプログレスダイアログの表示制御を行う.<br>
+	 * 複数のタスクを指定した場合は、最初のタスクから順番に実行される.<br>
+	 * 実行中のタスクがキャンセルまたは失敗した場合は、以降のタスクは処理されない.<br>
+	 * @param owner 親ウィンドウ
+	 * @param bgTasks ワーカーのリスト
+	 */
+	public static void doProgressAndWait(Window owner, FutureTask<?>... bgTasks) {
+		Objects.requireNonNull(bgTasks);
+
+		ChainedJavaFXTask bgTask = new ChainedJavaFXTask();
+		for (FutureTask<?> task : bgTasks) {
+			bgTask.addTask(task);
+		}
+		progressAndWait(owner, bgTask, (self) -> {
+			return self.bgTaskSerive.createAsyncCompletableFuture(bgTask);
+		});
+	}
+
+	/**
+	 * すでに実行されているCompletableなワーカーに対するプログレスダイアログの表示制御を行う.<br>
+	 * @param owner
+	 * @param bgTask プログレスに表示するプロパティをもつTask
+	 * @param cf タスクの実際の実行状態を示すCompletableFuture
+	 */
+	public static void progressAndWait(Window owner, Task<?> bgTask,
+			CompletableFuture<?> cf) {
+		progressAndWait(owner, bgTask, (self) -> cf);
+	}
+
+	/**
+	 * ワーカーに対するプログレスダイアログの表示制御を行う.<br>
+	 * cfFactoryは、すでに開始されているCompletableFutureを返してもよいし、
+	 * あるいはファクトリによってCompletableFutureを作成して返しても良い.<br>
+	 * @param owner 親ウィンドウ
+	 * @param bgTask プログレスに表示するプロパティをもつTask
+	 * @param cfFactory タスクの実際の実行状態を示すCompletableFutureを返す.
+	 */
+	private static void progressAndWait(Window owner, Task<?> bgTask,
+			Function<ProgressController, CompletableFuture<?>> cfFactory) {
+		Objects.requireNonNull(bgTask);
+
+		Instance<ProgressController> progProv = CDI.current()
+				.select(ProgressController.class);
 		ProgressController controller = progProv.get();
 		try {
 			controller.setOwner(owner);
 
 			Stage stg = controller.getStage();
+			controller.bind(bgTask);
 
-			stg.titleProperty().bind(bgTask.titleProperty());
-			controller.labelTextProperty().bind(bgTask.messageProperty());
-			controller.progressProperty().set(-1); // 既定はintermediate (サークル表示)
-
-			bgTask.setOnRunning(e -> {
-				// タスク開始により進行状態をバインドする.
-				controller.progressProperty().bind(bgTask.progressProperty());
-			});
-
-			controller.setOnCancel(evt -> {
-				log.info("☆☆☆request cancel☆☆☆"); //$NON-NLS-1$
-				bgTask.cancel();
-				evt.consume();
-			});
-
-			// Taskを開始しCompletableFutureとして返す.
-			CompletableFuture<Void> cf = controller.bgTaskSerive
-					.createAsyncCompletableFuture(bgTask);
+			CompletableFuture<?> cf = cfFactory.apply(controller);
 
 			// タスク完了した場合にダイアログを閉じる.
 			cf.whenCompleteAsync((ret, ex) -> {
-				// バインド解除
-				stg.titleProperty().unbind();
-				controller.progressProperty().unbind();
-				controller.labelTextProperty().unbind();
-
-				// ※ intermediateを解除しないとメモリリークする. (java8u77現在)
-				controller.progressProperty().set(1);
+				controller.unbind();
 
 				// ダイアログを閉じる
 				controller.closeWindow();
 
-			}, controller.guiExecutor); // JavaFXスレッドで実行する.
+			} , controller.guiExecutor); // JavaFXスレッドで実行する.
 
 			// モーダルダイアログで表示する.
-			if (!bgTask.isDone()) {
+			if (!cf.isDone()) {
 				stg.showAndWait();
 			}
-			assert !bgTask.isRunning();
 
 		} finally {
 			progProv.destroy(controller);
