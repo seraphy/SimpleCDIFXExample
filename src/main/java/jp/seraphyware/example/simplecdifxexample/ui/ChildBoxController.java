@@ -4,7 +4,6 @@ import java.net.URL;
 import java.util.Objects;
 import java.util.ResourceBundle;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 import javax.annotation.PostConstruct;
@@ -25,6 +24,7 @@ import javafx.stage.Modality;
 import jp.seraphyware.example.simplecdifxexample.service.ExampleService;
 import jp.seraphyware.example.simplecdifxexample.utils.BackgroundTaskService;
 import jp.seraphyware.example.simplecdifxexample.utils.ErrorDialogUtils;
+import jp.seraphyware.example.simplecdifxexample.utils.ParallelJavaFXTask;
 
 @Dependent
 public class ChildBoxController implements Initializable, WindowController {
@@ -117,35 +117,15 @@ public class ChildBoxController implements Initializable, WindowController {
 		Task<Long> bgTask2 = createTask("(2)");
 		Task<Long> bgTask3 = createTask("(3)");
 
-		CompletableFuture<Long> cf1 = bgTaskService.wrapCompletableFuture(bgTask1);
-		CompletableFuture<Long> cf2 = bgTaskService.wrapCompletableFuture(bgTask2);
-		CompletableFuture<Long> cf3 = bgTaskService.wrapCompletableFuture(bgTask3);
-		CompletableFuture<Void> cfAll = CompletableFuture.allOf(cf1, cf2, cf3);
-		cf1.whenComplete((ret, ex) -> {
-			if (ex != null) {
-				cfAll.cancel(true);
-			}
-		});
+		// 並列で複数ジョブを実行する.
+		// UIは複数のジョブのメッセージ、進捗を連結したものとなる.(タイトルは最初のジョブのみ)
+		ParallelJavaFXTask parallelTask = new ParallelJavaFXTask(bgTaskService);
+		parallelTask.addTask(bgTask1);
+		parallelTask.addTask(bgTask2);
+		parallelTask.addTask(bgTask3);
 
-		// UIはbgTask1のものを使う.他のタスクの状態はUIには反映されない.
-		// ダイアログは、すべてのタスクの完了によって自動的に終了する.
-		// キャンセルボタンはbgTask1に対してのみ効果があるため、それ以外のタスクの停止は行われない.
-		ProgressController
-			.showProgressAndWait(getStage(), bgTask1, task -> cfAll)
-			.whenComplete((ret, ex) -> {
-				String msg = null;
-				if (ex == null) {
-					try {
-						long ret1 = bgTask1.get();
-						long ret2 = bgTask1.get();
-						long ret3 = bgTask1.get();
-						msg = ret1 + ", " + ret2 + "," + ret3;
-					} catch (Throwable iex) {
-						ex = iex;
-					}
-				}
-				showResult(msg, ex);
-			});
+		ProgressController.doProgressAndWait(getStage(), bgTaskService, parallelTask)
+			.whenComplete(this::showResult);
 	}
 
 	private Task<Long> createTask(String name) {
