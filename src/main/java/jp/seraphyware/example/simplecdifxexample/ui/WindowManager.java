@@ -55,6 +55,16 @@ public class WindowManager {
 
 		// 閉じていなければ閉じる.
 		window.closeWindow();
+		unregister(window);
+	}
+
+	public void register(AbstractWindowController window) {
+		Objects.requireNonNull(window);
+		windowList.putIfAbsent(window, null);
+	}
+
+	public void unregister(AbstractWindowController window) {
+		Objects.requireNonNull(window);
 
 		CreationalContext<?> creationalContext = windowList.remove(window);
 		if (creationalContext != null) {

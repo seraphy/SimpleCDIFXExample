@@ -1,9 +1,11 @@
 package jp.seraphyware.example.simplecdifxexample.ui;
 
 import java.net.URL;
-import java.sql.Timestamp;
+import java.util.Objects;
 import java.util.ResourceBundle;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.context.Dependent;
@@ -21,6 +23,7 @@ import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TextField;
 import javafx.stage.Modality;
 import jp.seraphyware.example.simplecdifxexample.service.ExampleService;
+import jp.seraphyware.example.simplecdifxexample.utils.BackgroundTaskService;
 import jp.seraphyware.example.simplecdifxexample.utils.ErrorDialogUtils;
 
 @Dependent
@@ -36,6 +39,9 @@ public class ChildBoxController implements Initializable, WindowController {
 
 	@Inject
 	private ExampleService exampleService;
+
+	@Inject
+	private BackgroundTaskService bgTaskService;
 
 	@PostConstruct
 	public void postCtor() {
@@ -64,6 +70,9 @@ public class ChildBoxController implements Initializable, WindowController {
 		return root;
 	}
 
+	/**
+	 * アラートダイアログの例
+	 */
 	@FXML
 	protected void onShow() {
 		String text = textField.getText();
@@ -74,32 +83,97 @@ public class ChildBoxController implements Initializable, WindowController {
 		alert.showAndWait();
 	}
 
+	/**
+	 * 1つのタスクの進捗を示すプログレス例
+	 */
 	@FXML
 	protected void onFetch() {
 		textField.setText("wait a moment");
+		Task<Long> bgTask = createTask("");
+		ProgressController
+			.doProgressAndWait(getStage(), bgTaskService, bgTask)
+			.whenComplete(this::showResult);
+	}
 
-		Task<Long> bgTask = new Task<Long>() {
+	/**
+	 * 複数のタスクの直列的な進捗を示すプログレス例
+	 */
+	@FXML
+	protected void onFetchMulti() {
+		Task<Long> bgTask1 = createTask("(1)");
+		Task<Long> bgTask2 = createTask("(2)");
+
+		ProgressController
+			.doProgressAndWait(getStage(), bgTaskService, bgTask1, bgTask2)
+			.whenComplete(this::showResult);
+	}
+
+	/**
+	 * 複数のタスクの並列的な進捗を示すプログレス例.
+	 */
+	@FXML
+	private void onFetchPara() {
+		Task<Long> bgTask1 = createTask("(1)");
+		Task<Long> bgTask2 = createTask("(2)");
+		Task<Long> bgTask3 = createTask("(3)");
+
+		CompletableFuture<Long> cf1 = bgTaskService.wrapCompletableFuture(bgTask1);
+		CompletableFuture<Long> cf2 = bgTaskService.wrapCompletableFuture(bgTask2);
+		CompletableFuture<Long> cf3 = bgTaskService.wrapCompletableFuture(bgTask3);
+		CompletableFuture<Void> cfAll = CompletableFuture.allOf(cf1, cf2, cf3);
+		cf1.whenComplete((ret, ex) -> {
+			if (ex != null) {
+				cfAll.cancel(true);
+			}
+		});
+
+		// UIはbgTask1のものを使う.他のタスクの状態はUIには反映されない.
+		// ダイアログは、すべてのタスクの完了によって自動的に終了する.
+		// キャンセルボタンはbgTask1に対してのみ効果があるため、それ以外のタスクの停止は行われない.
+		ProgressController
+			.showProgressAndWait(getStage(), bgTask1, task -> cfAll)
+			.whenComplete((ret, ex) -> {
+				String msg = null;
+				if (ex == null) {
+					try {
+						long ret1 = bgTask1.get();
+						long ret2 = bgTask1.get();
+						long ret3 = bgTask1.get();
+						msg = ret1 + ", " + ret2 + "," + ret3;
+					} catch (Throwable iex) {
+						ex = iex;
+					}
+				}
+				showResult(msg, ex);
+			});
+	}
+
+	private Task<Long> createTask(String name) {
+		return new Task<Long>() {
 			@Override
 			protected Long call() throws Exception {
 				updateTitle("Calcurate Service");
 				return exampleService.fetchCurrentValue((cur, max) -> {
-					updateMessage("calcurating..." + cur + "/" + max);
+					updateMessage("calcurating" + name + "..." + cur + "/" + max);
 					updateProgress(cur, max);
 				});
 			}
 		};
+	}
 
-		ProgressController.doProgressAndWait(getStage(), bgTask);
+	private <T> void showResult(T ret, Throwable ex) {
+		if (ex != null) {
+			if (ex instanceof CompletionException) {
+				ex = ((CompletionException) ex).getCause();
+			}
+			if (ex instanceof CancellationException) {
+				textField.setText("Cancel");
 
-		try {
-			Long result = bgTask.get();
-			textField.setText(new Timestamp(result).toString());
-
-		} catch (CancellationException ex) {
-			textField.setText("cancel");
-
-		} catch (Exception ex) {
-			ErrorDialogUtils.showException(getStage(), ex);
+			} else {
+				ErrorDialogUtils.showException(getStage(), ex);
+			}
+		} else {
+			textField.setText(Objects.toString(ret));
 		}
 	}
 }

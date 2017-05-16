@@ -4,5 +4,7 @@
 	<entry key="mainWindow.closeConfirm">Are you sure you want to exit the application?</entry>
 	<entry key="initial.message">Hello, World!</entry>
 	<entry key="btn.childbox.show">Show</entry>
-	<entry key="btn.childbox.fetch">Fetch</entry>
+	<entry key="btn.childbox.fetch">Single</entry>
+	<entry key="btn.childbox.fetchMulti">Multi</entry>
+	<entry key="btn.childbox.fetchPara">Para</entry>
 </properties>

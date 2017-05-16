@@ -7,6 +7,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -74,8 +75,9 @@ public class BackgroundTaskService implements Executor {
 	}
 
 	/**
-	 * 非同期完了可能フューチャを作成して返す.
-	 * @param supplier
+	 * 非同期完了可能フューチャを作成して返す.<br>
+	 * タスクは開始される.<br>
+	 * @param supplier タスク
 	 * @return
 	 */
 	public <U> CompletableFuture<U> createSupplyAsyncCompletableFuture(
@@ -85,14 +87,35 @@ public class BackgroundTaskService implements Executor {
 	}
 
 	/**
-	 * 非同期完了可能フューチャを作成して返す.
-	 * @param supplier
+	 * 非同期完了可能フューチャを作成して返す.<br>
+	 * タスクは開始される.<br>
+	 * @param task タスク
 	 * @return
 	 */
 	public CompletableFuture<Void> createAsyncCompletableFuture(
 			Runnable task) {
 		Objects.requireNonNull(task);
 		return CompletableFuture.runAsync(task, executor);
+	}
+
+	/**
+	 * タスクを受け取り、そのタスクを開始して、完了可能フューチャーとして返す.<br>
+	 * @param task 開始するタスク
+	 * @return 完了可能なタスク.
+	 */
+	public <T> CompletableFuture<T> wrapCompletableFuture(FutureTask<T> task) {
+		CompletableFuture<T> cf = new CompletableFuture<>();
+		Runnable job = () -> {
+			try {
+				task.run();
+				cf.complete(task.get());
+
+			} catch (Throwable ex) {
+				cf.completeExceptionally(ex);
+			}
+		};
+		executor.submit(job);
+		return cf;
 	}
 
 	/**

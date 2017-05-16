@@ -1,6 +1,8 @@
 package jp.seraphyware.example.simplecdifxexample.utils;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -17,7 +19,7 @@ import javafx.concurrent.Task;
  * 実行中のタスクがキャンセルまたは失敗した場合は、以降のタスクは処理されない.<br>
  * 実行中にタスクが増減することは想定されていない.<Br>
  */
-public class ChainedJavaFXTask extends Task<Object> {
+public class ChainedJavaFXTask extends Task<List<Object>> {
 
 	private LinkedList<FutureTask<?>> tasks = new LinkedList<>();
 
@@ -81,8 +83,8 @@ public class ChainedJavaFXTask extends Task<Object> {
 	}
 
 	@Override
-	protected Object call() throws Exception {
-		Object result = null;
+	protected List<Object> call() throws Exception {
+		List<Object> result = new ArrayList<>();
 		boolean cancelled = false;
 		Exception occurredException = null;
 		for (FutureTask<?> task : tasks) {
@@ -105,7 +107,7 @@ public class ChainedJavaFXTask extends Task<Object> {
 					task.run();
 
 					// 実行結果を取得する.
-					result = task.get();
+					result.add(task.get());
 
 				} catch (InterruptedException | CancellationException ex) {
 					cancelled = true;

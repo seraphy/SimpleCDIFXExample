@@ -1,7 +1,9 @@
 package jp.seraphyware.example.simplecdifxexample.ui;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
 import java.util.logging.Logger;
@@ -9,8 +11,8 @@ import java.util.logging.Logger;
 import javax.enterprise.context.Dependent;
 import javax.enterprise.inject.Instance;
 import javax.enterprise.inject.spi.CDI;
-import javax.inject.Inject;
 
+import javafx.application.Platform;
 import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.StringProperty;
 import javafx.concurrent.Task;
@@ -24,10 +26,8 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.stage.WindowEvent;
-import jp.seraphyware.example.simplecdifxexample.utils.BackgroundTaskService;
 import jp.seraphyware.example.simplecdifxexample.utils.ChainedJavaFXTask;
 import jp.seraphyware.example.simplecdifxexample.utils.FXMLWindowController;
-import jp.seraphyware.example.simplecdifxexample.utils.FXThreadExecutor;
 
 @Dependent
 @FXMLWindowController("Progress.fxml")
@@ -43,12 +43,6 @@ public class ProgressController extends AbstractFXMLWindowController {
 
 	@FXML
 	private Label txtLabel;
-
-	@Inject
-	private BackgroundTaskService bgTaskSerive;
-
-	@Inject
-	private FXThreadExecutor guiExecutor;
 
 	@Override
 	public void onCloseRequest(WindowEvent event) {
@@ -119,58 +113,71 @@ public class ProgressController extends AbstractFXMLWindowController {
 	}
 
 	/**
-	 * ワーカーの実行と、実行中のプログレスダイアログの表示制御を行う.<br>
-	 * @param owner 親ウィンドウ
-	 * @param bgTask ワーカー
-	 */
-	public static void doProgressAndWait(Window owner, Task<?> bgTask) {
-		Objects.requireNonNull(bgTask);
-		progressAndWait(owner, bgTask, (self) -> {
-			return self.bgTaskSerive.createAsyncCompletableFuture(bgTask);
-		});
-	}
-
-	/**
 	 * 連続したワーカーの実行と、実行中のプログレスダイアログの表示制御を行う.<br>
 	 * 複数のタスクを指定した場合は、最初のタスクから順番に実行される.<br>
+	 * ワーカーに{@link javafx.concurrent.Task}を指定した場合はUI制御も行うことができる.<br>
 	 * 実行中のタスクがキャンセルまたは失敗した場合は、以降のタスクは処理されない.<br>
-	 * @param owner 親ウィンドウ
-	 * @param bgTasks ワーカーのリスト
+	 * ワーカー群はChainedJavaFXTaskによって1つのタスクにまとめられて、
+	 * {@link #showProgressAndWait(Window, Task, Executor)}が呼び出されている.<br>
+	 * @param owner 親ウィンドウ、null可
+	 * @param jobExecutor ジョブを実行するエグゼキュータ
+	 * @param bgTasks ワーカーのリスト、Taskクラスの場合はUI制御も可能
+	 * @return ジョブ全体の待ち合わせに使われたCompletableFuture
+	 * @see ChainedJavaFXTask
 	 */
-	public static void doProgressAndWait(Window owner, FutureTask<?>... bgTasks) {
+	public static CompletableFuture<List<Object>> doProgressAndWait(Window owner, Executor jobExecutor,
+			FutureTask<?>... bgTasks) {
 		Objects.requireNonNull(bgTasks);
 
 		ChainedJavaFXTask bgTask = new ChainedJavaFXTask();
 		for (FutureTask<?> task : bgTasks) {
 			bgTask.addTask(task);
 		}
-		progressAndWait(owner, bgTask, (self) -> {
-			return self.bgTaskSerive.createAsyncCompletableFuture(bgTask);
+
+		return doProgressAndWait(owner, jobExecutor, bgTask);
+	}
+
+	/**
+	 * ワーカーを指定したエグゼキュータで実行し、実行中のプログレスダイアログの表示制御を行う.<br>
+	 * @param owner 親ウィンドウ、null可
+	 * @param bgTask UIタスク
+	 * @param jobExecutor ジョブを実行するエグゼキュータ
+	 * @return ジョブの待ち合わせに使用されたCompletableFuture.(戻り値を受けた時点で、すでに完了済みである)
+	 */
+	public static <T> CompletableFuture<T> doProgressAndWait(Window owner, Executor jobExecutor, Task<T> bgTask) {
+		Objects.requireNonNull(bgTask);
+		Objects.requireNonNull(jobExecutor);
+
+		return showProgressAndWait(owner, bgTask, task -> {
+			CompletableFuture<T> cf = new CompletableFuture<>();
+			Runnable uiTaskWrap = () -> {
+				try {
+					bgTask.run();
+					cf.complete(bgTask.get());
+
+				} catch (Throwable ex) {
+					cf.completeExceptionally(ex);
+				}
+			};
+			jobExecutor.execute(uiTaskWrap);;
+			return cf;
 		});
 	}
 
 	/**
-	 * すでに実行されているCompletableなワーカーに対するプログレスダイアログの表示制御を行う.<br>
-	 * @param owner
-	 * @param bgTask プログレスに表示するプロパティをもつTask
-	 * @param cf タスクの実際の実行状態を示すCompletableFuture
+	 * プログレスダイアログを表示する.<br>
+	 * このメソッド自身ではジョブの実行制御は行わないため、すでに起動しているbgTaskを与えるか、もしくは
+	 * cfFactory関数が呼び出された時点で開始することを想定している.<br>
+	 * cfFactoryが返したCompluetableFutureで完了状態になったらプログレスダイアログは閉じられる.<br>
+	 * @param owner 親ウィンドウ、null可
+	 * @param bgTask UI制御プロパティもつ持つジョブ。ジョブのUIを接続するだけで、開始等の制御については関知しない。
+	 * @param cfFactory ジョブを指定して、そのジョブに対するCompletableFutureを返す関数.<br>
+	 * @return ジョブの待ち合わせに使用されたCompletableFuture.(戻り値を受けた時点で、すでに完了済みである)
 	 */
-	public static void progressAndWait(Window owner, Task<?> bgTask,
-			CompletableFuture<?> cf) {
-		progressAndWait(owner, bgTask, (self) -> cf);
-	}
-
-	/**
-	 * ワーカーに対するプログレスダイアログの表示制御を行う.<br>
-	 * cfFactoryは、すでに開始されているCompletableFutureを返してもよいし、
-	 * あるいはファクトリによってCompletableFutureを作成して返しても良い.<br>
-	 * @param owner 親ウィンドウ
-	 * @param bgTask プログレスに表示するプロパティをもつTask
-	 * @param cfFactory タスクの実際の実行状態を示すCompletableFutureを返す.
-	 */
-	private static void progressAndWait(Window owner, Task<?> bgTask,
-			Function<ProgressController, CompletableFuture<?>> cfFactory) {
+	public static <T, R> CompletableFuture<R> showProgressAndWait(Window owner, Task<T> bgTask,
+			Function<Task<T>, CompletableFuture<R>> cfFactory) {
 		Objects.requireNonNull(bgTask);
+		Objects.requireNonNull(cfFactory);
 
 		Instance<ProgressController> progProv = CDI.current()
 				.select(ProgressController.class);
@@ -181,7 +188,7 @@ public class ProgressController extends AbstractFXMLWindowController {
 			Stage stg = controller.getStage();
 			controller.bind(bgTask);
 
-			CompletableFuture<?> cf = cfFactory.apply(controller);
+			CompletableFuture<R> cf = cfFactory.apply(bgTask);
 
 			// タスク完了した場合にダイアログを閉じる.
 			cf.whenCompleteAsync((ret, ex) -> {
@@ -190,15 +197,18 @@ public class ProgressController extends AbstractFXMLWindowController {
 				// ダイアログを閉じる
 				controller.closeWindow();
 
-			} , controller.guiExecutor); // JavaFXスレッドで実行する.
+			} , Platform::runLater); // JavaFXスレッドで実行する.
 
 			// モーダルダイアログで表示する.
 			if (!cf.isDone()) {
 				stg.showAndWait();
 			}
 
+			return cf;
+
 		} finally {
 			progProv.destroy(controller);
 		}
 	}
+
 }

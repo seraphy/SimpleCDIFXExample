@@ -3,6 +3,8 @@ package jp.seraphyware.example.simplecdifxexample.ui;
 import java.util.Arrays;
 import java.util.Collection;
 
+import javax.inject.Inject;
+
 import javafx.application.Platform;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
@@ -13,6 +15,12 @@ import javafx.stage.WindowEvent;
 import jp.seraphyware.example.simplecdifxexample.Main;
 
 public abstract class AbstractWindowController extends AbstractController {
+
+	/**
+	 * ウィンドウマネージャ
+	 */
+	@Inject
+	private WindowManager windowMgr;
 
 	/**
 	 * 親ウィンドウ、null可
@@ -119,6 +127,13 @@ public abstract class AbstractWindowController extends AbstractController {
 		Stage stage = new Stage();
 		stage.initOwner(owner);
 		stage.setOnCloseRequest(closeRequestHandler);
+
+		stage.setOnShown(evt -> {
+			windowMgr.register(this);
+		});
+		stage.setOnHidden(evt -> {
+			windowMgr.unregister(this);
+		});
 
 		// アイコンの設定 (最適なサイズが選択される)
 		Collection<Image> icons = getIcons();
