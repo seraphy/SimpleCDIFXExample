@@ -15,7 +15,13 @@ import javafx.concurrent.Task;
 import javafx.util.Pair;
 
 /**
- * 複数の
+ * 複数のTaskを並列に実行するTask.<br>
+ * メッセージはすべてのタスクのメッセージを改行で連結したものとなり、
+ * 進捗も、すべてのタスクの合計で求められます.<br>
+ * 空コンストラクタか、Executorがnullの場合は、すでに実行しているタスクのUIをまとめることを
+ * 想定しており、ジョブの制御は行いません.<br>
+ * Executorを指定した場合は、このタスクの実行時にすべてのタスクの並列実行を開始して、
+ * その完了を待機します.<br>
  */
 public class ParallelJavaFXTask extends Task<List<Object>> {
 
@@ -35,8 +41,11 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 
 	private Executor executor;
 
+	public ParallelJavaFXTask() {
+		this(null);
+	}
+
 	public ParallelJavaFXTask(Executor executor) {
-		Objects.requireNonNull(executor);
 		this.executor = executor;
 	}
 
@@ -75,10 +84,16 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 		for (FutureTask<?> task : tasks) {
 			if (task instanceof Task) {
 				total += 1d;
-				sum += ((Task<?>) task).getProgress();
+				double pos = ((Task<?>) task).getProgress();
+				if (pos < 0 || sum < 0) {
+					// indeterminateがある場合はindeterminateに固定
+					sum = -1d;
+				} else {
+					sum += pos;
+				}
 			}
 		}
-		if (total <= 0) {
+		if (total <= 0 || sum < 0) {
 			updateProgress(-1, 0);
 
 		} else {
@@ -136,7 +151,6 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 	protected CompletableFuture<Void> executeParallel(Executor executor) {
 		Objects.requireNonNull(executor);
 
-
 		List<Pair<Runnable, CompletableFuture<Object>>> runnables = new ArrayList<>();
 
 		AtomicReference<Throwable> firstException = new AtomicReference<>();
@@ -159,7 +173,7 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 							(prev, cur) -> prev == null ? cur : prev);
 					cf.completeExceptionally(iex);
 
-					// 例外が発生した場合は他のタスクは中止する.
+					// 例外が発生した場合は他のタスクも中止する.
 					tasks.forEach(sibling -> {
 						if (!task.equals(sibling)) {
 							if (!sibling.isDone()) {
@@ -174,22 +188,58 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 
 		for (Pair<Runnable, CompletableFuture<Object>> pair : runnables) {
 			Runnable wrapper = pair.getKey();
-			executor.execute(wrapper);
+			CompletableFuture<Object> cf = pair.getValue();
+			try {
+				executor.execute(wrapper);
+
+			} catch (RuntimeException ex) {
+				// 開始できなかった場合、失敗で完了状態とする.
+				cf.completeExceptionally(ex);
+			}
 		}
 
-		return CompletableFuture
-				.allOf(runnables.stream().map(pair -> pair.getValue()).toArray(siz -> new CompletableFuture[siz]));
+		CompletableFuture<Void> allCf = CompletableFuture
+				.allOf(runnables.stream().map(pair -> pair.getValue())
+						.toArray(siz -> new CompletableFuture[siz]));
+		return allCf;
 	}
 
 	@Override
 	protected List<Object> call() throws Exception {
+		if (executor != null) {
+			// 並列実行を開始する
+			CompletableFuture<Void> cf = executeParallel(executor);
+			try {
+				// すべての完了を待って、結果もしくは例外を取得する.
+				cf.get();
+
+			} catch (ExecutionException ex) {
+				// 例外はラップされているので解除する.
+				Throwable iex = ex.getCause();
+				if (iex instanceof Exception) {
+					throw (Exception) iex;
+				}
+				throw ex;
+			}
+		}
+
 		List<Object> result = new ArrayList<>();
 
-		CompletableFuture<Void> cf = executeParallel(executor);
-		cf.get();
-
+		// すべてのタスクの結果をリストにして返す.
 		for (FutureTask<?> task : tasks) {
-			result.add(task.get());
+			try {
+				result.add(task.get());
+
+			} catch (ExecutionException ex) {
+				// 例外はラップされているので解除する.
+				// 最初の例外でスローする.
+				// (残りのタスクの完了は待たない.)
+				Throwable iex = ex.getCause();
+				if (iex instanceof Exception) {
+					throw (Exception) iex;
+				}
+				throw ex;
+			}
 		}
 
 		return result;
