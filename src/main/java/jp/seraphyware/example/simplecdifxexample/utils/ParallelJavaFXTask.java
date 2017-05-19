@@ -20,10 +20,14 @@ import javafx.util.Pair;
  * 進捗も、すべてのタスクの合計で求められます.<br>
  * 空コンストラクタか、Executorがnullの場合は、すでに実行しているタスクのUIをまとめることを
  * 想定しており、ジョブの制御は行いません.<br>
- * Executorを指定した場合は、このタスクの実行時にすべてのタスクの並列実行を開始して、
- * その完了を待機します.<br>
+ * このタスクを実行した場合は、すべての子タスクの完了を単純に待ちます.<br>
+ * Executorを指定した場合は、このタスクの実行時にすべての子タスクの並列実行を開始してから、
+ * すべての子タスクの完了を待機します.<br>
+ * いずれかの子タスクが例外を返した時点で子タスクの待ち合わせは終了し最初の例外を、
+ * このタスクの例外としてます.<br>
+ * すべての子タスクが正常終了した場合は、これらの結果をリストとしたものを返します.<br>
  */
-public class ParallelJavaFXTask extends Task<List<Object>> {
+public class ParallelJavaFXTask extends CompletableUITask<List<Object>> {
 
 	private LinkedList<FutureTask<?>> tasks = new LinkedList<>();
 
@@ -208,6 +212,7 @@ public class ParallelJavaFXTask extends Task<List<Object>> {
 	protected List<Object> call() throws Exception {
 		if (executor != null) {
 			// 並列実行を開始する
+			// executorがnullの場合は子タスクは開始済みと想定している.
 			CompletableFuture<Void> cf = executeParallel(executor);
 			try {
 				// すべての完了を待って、結果もしくは例外を取得する.

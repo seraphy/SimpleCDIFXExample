@@ -19,7 +19,7 @@ import javafx.concurrent.Task;
  * 実行中のタスクがキャンセルまたは失敗した場合は、以降のタスクは処理されない.<br>
  * 実行中にタスクが増減することは想定されていない.<Br>
  */
-public class ChainedJavaFXTask extends Task<List<Object>> {
+public class ChainedJavaFXTask extends CompletableUITask<List<Object>> {
 
 	private LinkedList<FutureTask<?>> tasks = new LinkedList<>();
 
