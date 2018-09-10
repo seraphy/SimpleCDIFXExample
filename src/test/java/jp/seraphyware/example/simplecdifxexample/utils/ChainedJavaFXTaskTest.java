@@ -2,6 +2,8 @@ package jp.seraphyware.example.simplecdifxexample.utils;
 
 import static org.junit.Assert.*;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
@@ -24,8 +26,8 @@ public class ChainedJavaFXTaskTest {
 	public void testEmpty() throws Exception {
 		ChainedJavaFXTask task = new ChainedJavaFXTask();
 		ForkJoinPool.commonPool().execute(task);
-		Object ret = task.get();
-		assertNull(ret);
+		List<Object> ret = task.get();
+		assertTrue(ret.isEmpty());
 	}
 
 	@Test
@@ -36,7 +38,7 @@ public class ChainedJavaFXTaskTest {
 		task.addTask(childTask);
 
 		ForkJoinPool.commonPool().execute(task);
-		assertEquals("OK", task.get());
+		assertEquals(Arrays.asList("OK"), task.get());
 		assertEquals("OK", childTask.get());
 	}
 
@@ -56,7 +58,7 @@ public class ChainedJavaFXTaskTest {
 		task.addTask(childTask);
 
 		ForkJoinPool.commonPool().execute(task);
-		assertEquals("OK", task.get());
+		assertEquals(Arrays.asList("OK"), task.get());
 		assertEquals("OK", childTask.get());
 
 		assertTrue(Platform.isFxApplicationThread());
@@ -82,7 +84,7 @@ public class ChainedJavaFXTaskTest {
 		task.addTask(childTask3);
 
 		ForkJoinPool.commonPool().execute(task);
-		assertEquals("OK3", task.get());
+		assertEquals(Arrays.asList("OK1", "OK2", "OK3"), task.get());
 		assertEquals("OK1", childTask1.get());
 		assertEquals("OK2", childTask2.get());
 		assertEquals("OK3", childTask3.get());
@@ -114,7 +116,7 @@ public class ChainedJavaFXTaskTest {
 		task.addTask(childTask2);
 
 		ForkJoinPool.commonPool().execute(task);
-		assertEquals("OK2", task.get());
+		assertEquals(Arrays.asList("OK1", "OK2"), task.get());
 		assertEquals("OK1", childTask1.get());
 		assertEquals("OK2", childTask2.get());
 
